@@ -3,187 +3,112 @@ import './index.scss'
 import { observable, computed, action, autorun } from 'mobx'
 const log = console.log
 
-class Point {
-    static for(x: number, y: number) {
-        return new Point(x, y)
+const SUN_RADIUS = 695510 // km
+const SUN_EARTH_DISTANCE = 149600000 // km
+const EARTH_RADIUS = 6371 // km
+const MOON_RADIUS = 1731 // km
+
+class Body {
+    id: string
+    planet: Body|null = null
+    moons: Body[] = []
+    @observable depth: number = 0
+    random: number = Math.random()
+    constructor(id: string) {
+        this.id = id
     }
 
-    x: number
-    y: number
-    constructor(x: number, y: number) {
-        this.x = x
-        this.y = y
+    @computed get radius() { // Start with radius of sun, decreasing with orbit depth
+        return SUN_RADIUS * (1/4**this.depth)
     }
 
-    equals(op: Point) {
-        return this.x === op.x && this.y === op.y
+    @computed get mass() {
+        // Assume our bodies are approximately as dense as the Earth
+        const earthDensity = 5.51 // g/cm^3
+        const bodyVolume = (4/3)*Math.PI*(this.radius**3)
+        return bodyVolume * earthDensity
     }
 
-    dist(op: Point) {
-        return Math.abs(this.x-op.x)+Math.abs(this.y-op.y)
-    }
-}
-
-interface PixelPoint {
-    step: number
-    color: string
-    rp: Point
-}
-
-class Line {
-    start: Point
-    end: Point
-    stepStart: number
-    stepEnd: number
-    facing: string
-    constructor(facing: string, x1: number, y1: number, x2: number, y2: number, stepStart: number, stepEnd: number) {
-        this.start = Point.for(x1, y1)
-        this.end = Point.for(x2, y2)
-        this.stepStart = stepStart
-        this.stepEnd = stepEnd
-        this.facing = facing
+    @computed get orbitalPeriod() {
+        if (!this.planet)
+            return 0
+        // https://en.wikipedia.org/wiki/Orbital_period
+        const a = this.distanceFromPlanet*2 // Semi-major axis
+        const G = 6.674e-11 // Universal gravitational constant
+        const M = this.planet.mass
+        const mu = G*M
+        const timeToOrbit = (2*Math.PI * Math.sqrt((a**3)/mu)) // Kepler's third law, in seconds
+        return timeToOrbit
     }
 
-    intersection(ol: Line) {
-        const p1 = this.start, p2 = this.end
-        const o1 = ol.start, o2 = ol.end
-        const x1 = p1.x, y1 = p1.y
-        const x2 = p2.x, y2 = p2.y
-        const x3 = o1.x, y3 = o1.y
-        const x4 = o2.x, y4 = o2.y
-    
-        // Check if none of the lines are of length 0
-        if ((x1 === x2 && y1 === y2) || (x3 === x4 && y3 === y4)) {
-            return false
+    @computed get distanceFromPlanet() {
+        if (!this.planet)
+            return 0
+
+        return (0.2 + Math.random()*10) * (SUN_EARTH_DISTANCE * (1/4**this.depth))
+    }
+
+    pathToOrigin(): Body[] {
+        const path: Body[] = []
+        let planet: Body|null = this.planet
+        while (planet) {
+            path.push(planet)
+            planet = planet.planet
         }
-
-        const denominator = ((y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1))
-
-        // Lines are parallel
-        if (denominator === 0) {
-            return false
-        }
-
-        let ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denominator
-        let ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denominator
-
-        // is the intersection along the segments
-        if (ua < 0 || ua > 1 || ub < 0 || ub > 1) {
-            return false
-        }
-
-        // Return a object with the x and y coordinates of the intersection
-        let x = x1 + ua * (x2 - x1)
-        let y = y1 + ua * (y2 - y1)
-
-        return Point.for(x, y)
-    }    
-}
-
-function toLines(wiredef: string): Line[] {
-    const moves = wiredef.split(",")
-    const lines: Line[] = []
-    let x = 0
-    let y = 0
-    let steps = 0
-
-    for (const move of moves) {
-        const facing = move[0]
-        const dist = parseInt(move.slice(1))
-
-        if (isNaN(dist))
-            continue
-
-        const x1 = x
-        const y1 = y
-
-        if (facing === 'R') {
-            x += dist
-        } else if (facing === 'D') {
-            y += dist
-        } else if (facing === 'L') {
-            x -= dist
-        } else if (facing === 'U') {
-            y -= dist
-        }
-
-        lines.push(new Line(facing, x1, y1, x, y, steps, steps+dist))
-        steps += dist
+        return path
     }
-
-    return lines
 }
 
 class Puzzle {
     app: PuzzleApp
-    origin: Point = Point.for(0, 0)
 
     constructor(app: PuzzleApp) {
         this.app = app
     }
 
-    @computed get wires(): Line[][] {
-        return this.app.options.puzzleInput.trim().split("\n").map(w => toLines(w))
-    }
+    @computed get bodiesById(): {[id: string]: Body} {
+        const bodies: {[id: string]: Body} = {}
 
-    @computed get allLines() {
-        return _.flatten(this.wires)
-    }
-
-    @computed get endpoints() {
-        return this.allLines.map(l => l.end)
-    }
-
-    @computed get endstep() {
-        const endsteps = this.wires.map(w => w.length ? w[w.length-1].stepEnd : null)
-        return _.max(endsteps) || 10
-    }
-
-    // @computed get size() {
-    //     const extents = this.endpoints.map(p => Math.max(Math.abs(p.x), Math.abs(p.y)))
-    //     return extents.length ? extents[0]+5 : 10
-    // }
-
-    @computed get width() {
-        const xVals = this.endpoints.map(p => Math.abs(p.x))
-        return (_.max(xVals) || 5) * 2
-    }
-
-    @computed get height() {
-        const yVals = this.endpoints.map(p => Math.abs(p.y))
-        return (_.max(yVals) || 5) * 2
-    }
-
-    @computed get intersections() {
-        if (this.wires.length < 2)
-            return []
-
-        const intersections = []
-        for (const l1 of this.wires[0]) {
-            for (const l2 of this.wires[1]) {
-                const int = l1.intersection(l2)
-                if (int) {
-                    const step1 = l1.stepStart + l1.start.dist(int)
-                    const step2 = l2.stepStart + l2.start.dist(int)
-
-                    intersections.push({
-                        point: int,
-                        step: Math.max(step1, step2),
-                        combinedStep: step1+step2
-                    })
-                }
+        const getBody = (id: string) => {
+            let planet = bodies[id]
+            if (!planet) {
+                planet = new Body(id)
+                bodies[id] = planet
             }
+            return planet
         }
-        return intersections
+
+        for (const line of this.app.options.puzzleInput.trim().split("\n")) {
+            const [a, b] = line.split(")")
+            if (!a || !b) continue
+
+            const planet = getBody(a)
+            const moon = getBody(b)
+            planet.moons.push(moon)
+            moon.planet = planet
+        }
+
+        for (const body of _.values(bodies)) {
+            body.depth = body.pathToOrigin().length
+        }
+
+        return bodies
     }
 
-    @computed get closestIntersection() {
-        return _.sortBy(this.intersections, int => int.point.dist(this.origin))[0]
+    @computed get allBodies() {
+        return _.values(this.bodiesById)
     }
 
-    @computed get fastestIntersection() {
-        return _.sortBy(this.intersections, int => int.combinedStep)[0]
+    @computed get sun() {
+        return this.allBodies.find(p => !p.planet) || this.allBodies[0]
+    }
 
+    @computed get leafBodies() {
+        return this.allBodies.filter(p => !p.moons.length)
+    }
+
+    @computed get maxOrbitDepth(): number {
+        return _.max(this.leafBodies.map(p => p.pathToOrigin().length)) || 0
     }
 }
 
@@ -195,7 +120,7 @@ class PuzzleVisualization {
 
     @observable canvasWidth: number = 0
     @observable canvasHeight: number = 0
-    @observable step: number = 0
+    @observable timePassed: number = 0
     animationHandle: number|null = null
     drawTime: number = 1 * 1000
 
@@ -207,19 +132,6 @@ class PuzzleVisualization {
 
     get puzzle() {
         return this.app.puzzle
-    }
-
-    // A unit of movement should occupy the same vertical and horizontal screen space
-    @computed get cellPixelSize() {
-        return Math.min(this.canvasWidth-20, this.canvasHeight-20) / Math.max(this.puzzle.width, this.puzzle.height)
-    }
-
-    @computed get cellPixelWidth() {
-        return this.cellPixelSize
-    }
-
-    @computed get cellPixelHeight() {
-        return this.cellPixelSize
     }
 
     @action.bound start() {
@@ -256,116 +168,123 @@ class PuzzleVisualization {
         const frame = (timestamp: number) => {
             if (!start) start = timestamp
             const timePassed = timestamp-start
-            const fracPassed = Math.min(timePassed / this.drawTime, 1)
-            this.step = Math.floor(fracPassed * this.puzzle.endstep) 
-            if (fracPassed < 1)
-                this.animationHandle = requestAnimationFrame(frame)
+            this.timePassed = timePassed
+            this.animationHandle = requestAnimationFrame(frame)
         }
         this.animationHandle = requestAnimationFrame(frame)
     }
 
-    toRenderSpace(p: Point) {
-        return Point.for(
-            Math.round(this.canvasWidth/2 + this.cellPixelWidth * p.x),
-            Math.round(this.canvasHeight/2 + this.cellPixelHeight * p.y)
-        )
-    }
+    // toRenderSpace(p: Point) {
+    //     return Point.for(
+    //         Math.round(this.canvasWidth/2 + this.cellPixelWidth * p.x),
+    //         Math.round(this.canvasHeight/2 + this.cellPixelHeight * p.y)
+    //     )
+    // }
 
-    drawWire(wire: Line[]) {
-        for (const line of wire) {
-            if (line.stepEnd > this.step) {
-                let { x, y } = line.start
-                const dist = this.step - line.stepStart
+    renderBody(body: Body, cx: number, cy: number) {
+        const radius = 10 * Math.log(1+Math.log(1+body.radius)) / Math.log(Math.log(SUN_RADIUS))//10 * 1/(body.depth+1)
+        const color = body === this.puzzle.sun ? "#fc4646" : "#ffffff"
 
-                if (line.facing === 'R') {
-                    x += dist
-                } else if (line.facing === 'D') {
-                    y += dist
-                } else if (line.facing === 'L') {
-                    x -= dist
-                } else if (line.facing === 'U') {
-                    y -= dist
-                }
+        this.ctx.fillStyle = color 
+        this.ctx.beginPath()
+        this.ctx.arc(cx, cy, radius, 0, 2*Math.PI)
+        this.ctx.fill()
 
-                const p = Point.for(x, y)
-                const rp = this.toRenderSpace(p)
-                this.ctx.lineTo(rp.x, rp.y)
-                break
-            }
-
-            const rp = this.toRenderSpace(line.end)
-            this.ctx.lineTo(rp.x, rp.y)
+        const inc = 2*Math.PI / body.moons.length
+        for (const moon of body.moons) {
+            const orbitDuration = moon.orbitalPeriod*1000 / 1000000000
+            let theta = (this.timePassed/orbitDuration * 2*Math.PI)
+            const r = radius*4
+            const x = cx + r*Math.sin(theta)
+            const y = cy + r*Math.cos(theta)    
+            this.renderBody(moon, x, y)
+            theta += inc
         }
     }
 
     render() {
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-        const origin = this.toRenderSpace(this.puzzle.origin)
 
-        for (const wire of this.puzzle.wires) {
-            this.ctx.strokeStyle = wire === this.puzzle.wires[0] ? "#fc8d59" : "#91bfdb"
-            this.ctx.lineWidth = Math.ceil(this.cellPixelSize)*2
-            this.ctx.beginPath()
-            this.ctx.moveTo(origin.x, origin.y)
-            this.drawWire(wire)
-            this.ctx.stroke()
-        }
+        const cx = this.canvasWidth/2
+        const cy = this.canvasHeight/2
+        this.renderBody(this.puzzle.sun, cx, cy)
 
-        if (this.app.options.showIntersections) {
-            for (const int of this.puzzle.intersections) {
-                if (int.step > this.step)
-                    continue
-                const rp = this.toRenderSpace(int.point)
-                this.ctx.fillStyle = "#000000"
-                this.ctx.font = "10px Arial"
-                this.ctx.textBaseline = 'middle'
-                this.ctx.textAlign = "center"
-                this.ctx.fillText("x", rp.x, rp.y)
-            }    
-        }
+        // Evenly partition the rotational space
+        const r = 300
 
-        this.ctx.fillStyle = "#000000"
-        this.ctx.beginPath()
-        this.ctx.arc(origin.x, origin.y, Math.ceil(this.cellPixelSize)*2, 0, 2*Math.PI)
-        this.ctx.fill()
 
-        if (this.app.options.showSolution1) {
-            const { closestIntersection } = this.puzzle
-            if (closestIntersection && closestIntersection.step <= this.step) {
-                const rp = this.toRenderSpace(closestIntersection.point)
 
-                this.ctx.fillStyle = "#0f0f23"
-                this.ctx.beginPath()
-                this.ctx.arc(rp.x, rp.y, 6, 0, 2*Math.PI)
-                this.ctx.fill()
 
-                this.ctx.lineWidth = 1
-                this.ctx.strokeStyle = "#ffff66"
-                this.ctx.font = "10px Arial"
-                this.ctx.textBaseline = 'middle'
-                this.ctx.textAlign = "center"
-                this.ctx.strokeText("1", rp.x, rp.y+0.5)
-            }
-        }
 
-        if (this.app.options.showSolution2) {
-            const { fastestIntersection } = this.puzzle
-            if (fastestIntersection && fastestIntersection.step <= this.step) {
-                const rp = this.toRenderSpace(fastestIntersection.point)
 
-                this.ctx.lineWidth = 1
-                this.ctx.fillStyle = "#0f0f23"
-                this.ctx.beginPath()
-                this.ctx.arc(rp.x, rp.y, 6, 0, 2*Math.PI)
-                this.ctx.fill()
 
-                this.ctx.strokeStyle = "#ffff66"
-                this.ctx.font = "10px Arial"
-                this.ctx.textBaseline = 'middle'
-                this.ctx.textAlign = "center"
-                this.ctx.strokeText("2", rp.x, rp.y+0.5)
-            }
-        }
+
+        // const origin = this.toRenderSpace(this.puzzle.origin)
+
+        // for (const wire of this.puzzle.wires) {
+        //     this.ctx.strokeStyle = wire === this.puzzle.wires[0] ? "#fc8d59" : "#91bfdb"
+        //     this.ctx.lineWidth = Math.ceil(this.cellPixelSize)*2
+        //     this.ctx.beginPath()
+        //     this.ctx.moveTo(origin.x, origin.y)
+        //     this.drawWire(wire)
+        //     this.ctx.stroke()
+        // }
+
+        // if (this.app.options.showIntersections) {
+        //     for (const int of this.puzzle.intersections) {
+        //         if (int.step > this.step)
+        //             continue
+        //         const rp = this.toRenderSpace(int.point)
+        //         this.ctx.fillStyle = "#000000"
+        //         this.ctx.font = "10px Arial"
+        //         this.ctx.textBaseline = 'middle'
+        //         this.ctx.textAlign = "center"
+        //         this.ctx.fillText("x", rp.x, rp.y)
+        //     }    
+        // }
+
+        // this.ctx.fillStyle = "#000000"
+        // this.ctx.beginPath()
+        // this.ctx.arc(origin.x, origin.y, Math.ceil(this.cellPixelSize)*2, 0, 2*Math.PI)
+        // this.ctx.fill()
+
+        // if (this.app.options.showSolution1) {
+        //     const { closestIntersection } = this.puzzle
+        //     if (closestIntersection && closestIntersection.step <= this.step) {
+        //         const rp = this.toRenderSpace(closestIntersection.point)
+
+        //         this.ctx.fillStyle = "#0f0f23"
+        //         this.ctx.beginPath()
+        //         this.ctx.arc(rp.x, rp.y, 6, 0, 2*Math.PI)
+        //         this.ctx.fill()
+
+        //         this.ctx.lineWidth = 1
+        //         this.ctx.strokeStyle = "#ffff66"
+        //         this.ctx.font = "10px Arial"
+        //         this.ctx.textBaseline = 'middle'
+        //         this.ctx.textAlign = "center"
+        //         this.ctx.strokeText("1", rp.x, rp.y+0.5)
+        //     }
+        // }
+
+        // if (this.app.options.showSolution2) {
+        //     const { fastestIntersection } = this.puzzle
+        //     if (fastestIntersection && fastestIntersection.step <= this.step) {
+        //         const rp = this.toRenderSpace(fastestIntersection.point)
+
+        //         this.ctx.lineWidth = 1
+        //         this.ctx.fillStyle = "#0f0f23"
+        //         this.ctx.beginPath()
+        //         this.ctx.arc(rp.x, rp.y, 6, 0, 2*Math.PI)
+        //         this.ctx.fill()
+
+        //         this.ctx.strokeStyle = "#ffff66"
+        //         this.ctx.font = "10px Arial"
+        //         this.ctx.textBaseline = 'middle'
+        //         this.ctx.textAlign = "center"
+        //         this.ctx.strokeText("2", rp.x, rp.y+0.5)
+        //     }
+        // }
     }
 }
 
@@ -376,54 +295,54 @@ class PuzzleControls {
     }
 
     start() {
-        const { app } = this
-        const ui = document.querySelector("#ui") as HTMLDivElement
+        // const { app } = this
+        // const ui = document.querySelector("#ui") as HTMLDivElement
 
-        const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
-        inputArea.value = INITIAL_INPUT
-        inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
+        // const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
+        // inputArea.value = INITIAL_INPUT
+        // inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
 
-        const runWires = ui.querySelector("#runWires") as HTMLInputElement
-        runWires.onclick = () => { app.viz.drawTime = 1 * 1000; app.viz.beginAnimation() }
+        // const runWires = ui.querySelector("#runWires") as HTMLInputElement
+        // runWires.onclick = () => { app.viz.drawTime = 1 * 1000; app.viz.beginAnimation() }
     
-        const runWiresSlowly = ui.querySelector("#runWiresSlowly") as HTMLInputElement
-        runWiresSlowly.onclick = () => { app.viz.drawTime = 60 * 1000; app.viz.beginAnimation() }
+        // const runWiresSlowly = ui.querySelector("#runWiresSlowly") as HTMLInputElement
+        // runWiresSlowly.onclick = () => { app.viz.drawTime = 60 * 1000; app.viz.beginAnimation() }
     
-        const showIntersections = ui.querySelector("#showIntersections") as HTMLInputElement
-        showIntersections.onchange = () => app.options.showIntersections = showIntersections.checked
-        autorun(() => showIntersections.checked = app.options.showIntersections)
+        // const showIntersections = ui.querySelector("#showIntersections") as HTMLInputElement
+        // showIntersections.onchange = () => app.options.showIntersections = showIntersections.checked
+        // autorun(() => showIntersections.checked = app.options.showIntersections)
 
-        const showSolution1 = ui.querySelector("#showSolution1") as HTMLInputElement
-        showSolution1.onchange = () => app.options.showSolution1 = showSolution1.checked
-        autorun(() => showSolution1.checked = app.options.showSolution1)
+        // const showSolution1 = ui.querySelector("#showSolution1") as HTMLInputElement
+        // showSolution1.onchange = () => app.options.showSolution1 = showSolution1.checked
+        // autorun(() => showSolution1.checked = app.options.showSolution1)
 
-        const showSolution2 = ui.querySelector("#showSolution2") as HTMLInputElement
-        showSolution2.onchange = () => app.options.showSolution2 = showSolution2.checked
-        autorun(() => showSolution2.checked = app.options.showSolution2)
+        // const showSolution2 = ui.querySelector("#showSolution2") as HTMLInputElement
+        // showSolution2.onchange = () => app.options.showSolution2 = showSolution2.checked
+        // autorun(() => showSolution2.checked = app.options.showSolution2)
 
-        const solution1 = document.getElementById("solution1") as HTMLParagraphElement
-        const solution2 = document.getElementById("solution2") as HTMLParagraphElement
-        const solution1Code = solution1.querySelector("code") as HTMLSpanElement
-        const solution2Code = solution2.querySelector("code") as HTMLSpanElement
+        // const solution1 = document.getElementById("solution1") as HTMLParagraphElement
+        // const solution2 = document.getElementById("solution2") as HTMLParagraphElement
+        // const solution1Code = solution1.querySelector("code") as HTMLSpanElement
+        // const solution2Code = solution2.querySelector("code") as HTMLSpanElement
 
-        const { options, puzzle } = app
-        autorun(() => {
-            if (options.showSolution1 && puzzle.closestIntersection) {
-                solution1.style.display = 'block'
-                solution1Code.innerText = puzzle.closestIntersection.point.dist(puzzle.origin).toString()
-            } else {
-                solution1.style.display = 'none'
-            }
-        })
+        // const { options, puzzle } = app
+        // autorun(() => {
+        //     if (options.showSolution1 && puzzle.closestIntersection) {
+        //         solution1.style.display = 'block'
+        //         solution1Code.innerText = puzzle.closestIntersection.point.dist(puzzle.origin).toString()
+        //     } else {
+        //         solution1.style.display = 'none'
+        //     }
+        // })
 
-        autorun(() => {
-            if (options.showSolution2 && puzzle.fastestIntersection) {
-                solution2.style.display = 'block'
-                solution2Code.innerText = puzzle.fastestIntersection.combinedStep.toString()
-            } else {
-                solution2.style.display = 'none'
-            }
-        })
+        // autorun(() => {
+        //     if (options.showSolution2 && puzzle.fastestIntersection) {
+        //         solution2.style.display = 'block'
+        //         solution2Code.innerText = puzzle.fastestIntersection.combinedStep.toString()
+        //     } else {
+        //         solution2.style.display = 'none'
+        //     }
+        // })
     }
 }
 
@@ -457,54 +376,1020 @@ function main() {
     ;(window as any).app = app
     ;(window as any).puzzle = app.puzzle
     app.start()
-
-    // nanoRenderer.controls = new OrbitControls(nanoRenderer.camera, viz);
-
-
-    // const showRadius = ui.querySelector("#radiusOutline") as HTMLInputElement
-    // const centerPoints = ui.querySelector("#centerPoints") as HTMLInputElement
-    // showRadius.checked = nanoRenderer.showRadius
-    // showRadius.onchange = () => nanoRenderer.onToggleRadius(showRadius.checked)
-    // centerPoints.onchange = () => nanoRenderer.onToggleRadius(showRadius.checked)
-
-    // viz.appendChild(nanoRenderer.renderer.domElement);    
-
-    // nanoRenderer.update(INITIAL_INPUT)
-
-
-    // let isMouseDown = false
-    // function onMouseMove(e: MouseEvent|TouchEvent) {
-    //     if (!isMouseDown) return
-    //     const rect = viz.getBoundingClientRect()
-    //     const offsetX = (e as MouseEvent).offsetX || (e as any).targetTouches[0].pageX - rect.left
-    //     const offsetY = (e as MouseEvent).offsetY || (e as any).targetTouches[0].pageY - rect.top
-    //     nanoRenderer.mouseX = offsetX
-    //     nanoRenderer.mouseY = offsetY
-    // }
-
-    // function onMouseDown(event: MouseEvent|TouchEvent) {
-    //     isMouseDown = true
-    // }
-
-    // function onMouseUp(event: MouseEvent|TouchEvent) {
-    //     isMouseDown = false
-    // }
-
-    // viz.onmousemove = onMouseMove
-    // viz.onmousedown = onMouseDown
-    // viz.onmouseup = onMouseUp
-    // viz.onmouseleave = onMouseUp
-    // viz.onmousemove = onMouseMove
-    // viz.ontouchstart = onMouseDown
-    // viz.ontouchend = onMouseUp
-    // viz.ontouchmove = onMouseMove
-
-    // nanoRenderer.frameBind()
 }
 
-// const INITIAL_INPUT = `R75,D10,L1000`
-
-const INITIAL_INPUT = `R997,D443,L406,D393,L66,D223,R135,U452,L918,U354,L985,D402,R257,U225,R298,U369,L762,D373,R781,D935,R363,U952,L174,D529,L127,D549,R874,D993,L890,U881,R549,U537,L174,U766,R244,U131,R861,D487,R849,U304,L653,D497,L711,D916,R12,D753,R19,D528,L944,D155,L507,U552,R844,D822,R341,U948,L922,U866,R387,U973,R534,U127,R48,U744,R950,U522,R930,U320,R254,D577,L142,D29,L24,D118,L583,D683,L643,U974,L683,U985,R692,D271,L279,U62,R157,D932,L556,U574,R615,D428,R296,U551,L452,U533,R475,D302,R39,U846,R527,D433,L453,D567,R614,U807,R463,U712,L247,D436,R141,U180,R783,D65,L379,D935,R989,U945,L901,D160,R356,D828,R45,D619,R655,U104,R37,U793,L360,D242,L137,D45,L671,D844,R112,U627,R976,U10,R942,U26,L470,D284,R832,D59,R97,D9,L320,D38,R326,U317,L752,U213,R840,U789,L152,D64,L628,U326,L640,D610,L769,U183,R844,U834,R342,U630,L945,D807,L270,D472,R369,D920,R283,U440,L597,U137,L133,U458,R266,U91,R137,U536,R861,D325,R902,D971,R891,U648,L573,U139,R951,D671,R996,U864,L749,D681,R255,U306,R154,U706,L817,D798,R109,D594,R496,D867,L217,D572,L166,U723,R66,D210,R732,D741,L21,D574,L523,D646,R313,D961,L474,U990,R125,U928,L58,U726,R200,D364,R244,U622,R823,U39,R918,U549,R667,U935,R372,U241,L56,D713,L735,U735,L812,U700,L408,U980,L242,D697,L580,D34,L266,U190,R876,U857,L967,U493,R871,U563,L241,D636,L467,D793,R304,U103,L950,D503,R487,D868,L358,D747,L338,D273,L485,D686,L974,D724,L534,U561,R729,D162,R731,D17,R305,U712,R472,D158,R921,U827,L944,D303,L526,D782,R575,U948,L401,D142,L48,U766,R799,D242,R821,U673,L120
-L991,D492,L167,D678,L228,U504,R972,U506,R900,U349,R329,D802,R616,U321,R252,U615,R494,U577,R322,D593,R348,U140,L676,U908,L528,D247,L498,D79,L247,D432,L569,U206,L668,D269,L25,U180,R181,D268,R655,D346,R716,U240,L227,D239,L223,U760,L10,D92,L633,D425,R198,U222,L542,D790,L596,U667,L87,D324,R456,U366,R888,U319,R784,D948,R641,D433,L519,U950,L689,D601,L860,U233,R21,D214,L89,U756,L361,U258,L950,D483,R252,U206,L184,U574,L540,U926,R374,U315,R357,U512,R503,U917,R745,D809,L94,D209,R616,U47,R61,D993,L589,D1,R387,D731,R782,U771,L344,U21,L88,U614,R678,U259,L311,D503,L477,U829,R861,D46,R738,D138,L564,D279,L669,U328,L664,U720,L746,U638,R790,D242,R504,D404,R409,D753,L289,U128,L603,D696,L201,D638,L902,D279,L170,D336,L311,U683,L272,U396,R180,D8,R816,D904,L129,D809,R168,D655,L459,D545,L839,U910,L642,U704,R301,D235,R469,D556,L624,D669,L174,D272,R515,D60,L668,U550,L903,D881,L600,D734,R815,U585,R39,D87,R198,D418,L150,D964,L818,D250,L198,D127,R521,U478,L489,D676,L84,U973,R384,D167,R372,D981,L733,D682,R746,D803,L834,D421,R153,U752,L381,D990,R216,U469,L446,D763,R332,D813,L701,U872,L39,D524,L469,U508,L700,D382,L598,U563,R652,D901,R638,D358,L486,D735,L232,U345,R746,U818,L13,U618,R881,D647,R191,U652,R358,U423,L137,D224,R415,U82,R778,D403,R661,D157,R393,D954,L308,D986,L293,U870,R13,U666,L232,U144,R887,U364,L507,U520,R823,D11,L927,D904,R618,U875,R143,D457,R459,D755,R677,D561,L499,U267,L721,U274,L700,D870,L612,D673,L811,D695,R929,D84,L578,U201,L745,U963,L185,D687,L662,U313,L853,U314,R336`
+const INITIAL_INPUT = `Z4X)3VF
+HXK)QWX
+X2G)R3L
+QPS)YML
+G5J)LMV
+J7Y)JRF
+MPW)6BZ
+N1M)24G
+5DZ)PMN
+XVG)7Q5
+8WN)NJ7
+LPK)BCF
+B98)4XV
+R9C)Y1M
+92F)918
+JC2)HVF
+5PT)W81
+ZL7)XC4
+FSP)1SK
+DY3)NF6
+6BZ)F8Z
+PMN)Y4C
+CZ7)JWK
+J9S)PR3
+3WY)8S2
+TTH)2RR
+VRB)F5Y
+L1K)XVG
+1M9)TGN
+X84)XRZ
+PX7)RGD
+GZW)61P
+SL3)CZ7
+NY5)LSG
+T8B)QK4
+DB7)16B
+KHL)2DD
+5TR)YW2
+Y4C)6XW
+H2R)CVP
+CVP)428
+3CP)4MS
+V69)QZ4
+LQZ)QMC
+Q4N)SRY
+4FR)YQX
+8C3)TX8
+MMF)B98
+WXW)9CW
+4LV)XJN
+R85)YOU
+GW7)2WR
+954)9LZ
+F2T)1KX
+P2S)B8G
+FSY)D18
+9DV)YMQ
+K2G)SW4
+VYK)78M
+RHH)78Z
+RLD)6WH
+JJT)FHQ
+6D4)F83
+BQ8)S4L
+LQZ)NXN
+NP3)9CY
+TJF)QFX
+DTT)LHX
+R73)JFD
+PJH)XHG
+FMG)34T
+JLG)CWS
+1RC)KQ3
+4LW)6XM
+ZWN)FL4
+LQP)X25
+TJF)X5L
+X7X)HDF
+2PW)K23
+4GZ)6JM
+T6T)7TN
+FVD)GG8
+RQ6)DCR
+WQM)X84
+CZY)JF6
+TVG)LWH
+94D)GH2
+PM7)6W2
+Z71)CBZ
+1V2)3L5
+YG9)KQ4
+6DD)NJ4
+24G)DFD
+C58)TM9
+K6L)8XW
+TSP)5CH
+YJJ)48R
+654)BZQ
+LHX)YNY
+HGB)LLK
+32C)B1T
+6NB)PFL
+428)VPH
+LRH)7BQ
+FW2)WW1
+QMC)MG1
+THH)56B
+98Z)TZX
+C2Q)FN7
+G97)PZN
+R6Y)MXP
+NJ7)M8P
+DW7)TRX
+YNR)WZG
+GNK)3H7
+W3X)L8Z
+YFR)2GN
+JF5)MNS
+QM5)RR4
+XCY)4G5
+NLG)1RC
+BJS)JBD
+DQM)S4H
+FL4)JP8
+5BX)K4F
+HV1)XM1
+DVY)1WT
+XDL)32C
+DDF)GVW
+DFD)FVD
+YNY)SAN
+W4H)Z6R
+RYF)Q98
+86K)X58
+M39)3VG
+24M)CH4
+4CX)5GL
+BY1)23Q
+VQD)WNX
+6X4)WB8
+N4X)TFV
+XJN)KW8
+DTH)P83
+PPL)TK6
+K2G)F95
+1HP)8DD
+129)4LV
+RN9)76W
+4SR)HQQ
+TT1)FZY
+6GP)VZJ
+XWJ)YT5
+VK5)YH6
+KBL)924
+X1C)1S5
+QGQ)NJF
+XD3)L2W
+6NZ)RSW
+HXF)JL7
+NXK)VBT
+4FM)8FR
+K2F)PYV
+K6X)QD6
+JG3)8N7
+L2K)2Y9
+VJS)17H
+FK9)X9R
+2NJ)6FS
+11R)3LB
+SZZ)4FJ
+B43)LCJ
+P2N)Z81
+48R)NKC
+VFL)654
+69L)NP3
+RLR)Z71
+8FV)6ZJ
+YR4)42K
+YML)W3X
+2GN)VJS
+5KF)VJ5
+JPL)9LY
+9CY)8JB
+WB7)SZZ
+WZG)5R6
+FZB)X5P
+8S6)C9L
+34T)L1K
+DNH)9JD
+GKS)4HL
+Y17)G6Q
+47X)93F
+XKQ)46H
+NHW)5LP
+21L)XBQ
+YRG)X1F
+LBP)6DV
+6JM)488
+58G)VQY
+YD2)C1R
+F5C)J7Y
+YKV)ZWC
+X9B)G9J
+JL7)4VM
+HP7)8V7
+6C8)K36
+BHJ)SJJ
+RMH)2VW
+VP6)K6X
+VFB)X7X
+2VP)V18
+PZN)PM5
+ZDB)2KN
+PRT)425
+JVX)MSQ
+R57)D1M
+S6F)DZL
+7TT)D95
+VF8)H1G
+F1Y)FRV
+KL9)NHJ
+3BP)1B1
+YQX)J1Y
+L1X)5DZ
+GKM)GJX
+8PV)TVQ
+YD1)6XZ
+Q2G)GZW
+2R9)BCQ
+RR4)2YH
+QWX)8FN
+PBJ)TN8
+YYW)HXF
+4GZ)TT4
+C6T)2GS
+QXX)3JM
+CWS)7PJ
+8JH)CFG
+DRD)8WN
+76W)11R
+XKT)SDP
+PJR)M55
+H5X)83Q
+WP1)R73
+HG2)LPM
+SDP)DW7
+SFB)P96
+J1Y)BY1
+KQ4)1VZ
+5H8)L4D
+C5G)8TH
+2X9)SVL
+D1J)ZNM
+13V)C6T
+FYQ)JJC
+K4F)YD1
+RV8)KPX
+HLN)89K
+G91)B99
+F5Y)7TT
+6GY)DTT
+CCV)5LY
+B9Z)DQS
+MHT)J86
+HKQ)XPF
+JZF)RT3
+5GL)2X9
+KGH)DY4
+RTD)MPW
+T58)41Z
+ZNM)M6Y
+N1M)RTB
+TZG)MFC
+8P6)XFC
+X9M)RD7
+19S)XKT
+G31)RLR
+DYP)5T7
+SF1)954
+RTB)1MV
+VBT)BQ4
+Q96)8G6
+LNV)24M
+KZ3)N4S
+H9P)BX6
+82K)K74
+1FJ)SN3
+TDM)PC1
+3V1)DK8
+3X7)QJ8
+L4D)G4G
+H86)XWJ
+8FN)26D
+8QY)M98
+JRF)TTH
+8TK)YLM
+SXM)KZ3
+6RS)843
+J7Y)H1T
+2V7)XZ9
+R9X)SFL
+JQC)THH
+1B1)1X4
+7QK)LRY
+VHR)SS8
+ZXH)XKB
+F6R)6NZ
+P83)6YS
+XM1)9S4
+8R2)YFR
+7FR)LQP
+LHH)WN1
+XFC)KYD
+PLL)2H5
+NF6)WQM
+PMD)2V2
+BQ4)PRT
+2Y9)4HX
+PR3)ZX9
+ZNV)K4T
+18V)ZL7
+4R1)VBK
+Y83)T8B
+FZY)S56
+6W2)B7S
+NL3)W4Y
+C6T)TDX
+1CR)3L1
+XK9)SPT
+96R)SF1
+S7Z)H1C
+M8P)VP3
+3Q7)XDB
+2H5)F92
+SVJ)HB4
+XMQ)93Q
+YNP)XPL
+PM5)FTV
+2SK)RJN
+JWH)4LW
+NJF)M39
+TM5)Q3L
+ZYW)Y86
+8DD)TN4
+1NK)4DC
+JS9)NXK
+C9L)1P9
+SYP)NX2
+TCF)6S1
+4CC)JSJ
+WWL)NL3
+VZJ)C58
+V26)WN2
+56B)FWB
+CH4)Q6B
+DK8)BVX
+VQY)4H7
+P7W)XP2
+Q6H)2PW
+TN8)VFL
+TW3)KRJ
+G4G)VKY
+P74)DMF
+6NT)NZF
+BM9)JWH
+W73)XKV
+3KR)C5F
+TX8)9Q9
+JVF)NHT
+DXH)H86
+C1R)4N7
+XZV)3CP
+8LW)S6M
+W7M)MB3
+822)YWX
+RGD)DB7
+RX2)ZW3
+GYX)ZH4
+279)LKF
+1KX)LRH
+ZX9)8WL
+ZW4)C5G
+Q25)VYK
+DFD)NYL
+GZ9)6L1
+8DD)LHH
+FWZ)8FH
+HQQ)7CK
+ZHV)6X4
+XRZ)XTW
+TMG)S1R
+5XK)ZS6
+L81)JF2
+4V2)GQS
+5KM)GQZ
+HRP)ZNV
+DVZ)G9Q
+L9P)3BN
+BCF)XKQ
+TS5)44R
+B8G)XDL
+C63)Y17
+CBZ)T15
+Z3X)XK9
+WTG)TVG
+6XW)HXK
+4C6)P2R
+R2R)WKH
+47R)Q4N
+ZBZ)H9P
+4DC)KHL
+GG8)YK2
+K2Q)5SV
+TYQ)6BS
+DLK)VFB
+KSJ)R57
+BPV)K6L
+PFL)RZD
+3L1)DNH
+2VS)SNV
+K4X)G31
+WKH)HKQ
+5DZ)SFB
+4B3)TR2
+JC7)822
+PPC)4SP
+S1R)65Z
+CY8)YKV
+5LY)X4J
+Q3L)DXH
+K23)HLN
+HMX)LNL
+JJ4)RHH
+D95)8R2
+LCJ)VNV
+2ND)PJN
+B73)C2S
+24D)NY5
+1SK)JVF
+67X)FPG
+XZP)G55
+ZW4)V69
+FRV)CK2
+D6M)BJS
+XPL)RBB
+LZS)129
+8JB)D81
+J4T)Z4K
+6D4)PCG
+M6Y)SVX
+CWS)RQ6
+JC9)Q25
+LMT)FWZ
+JP8)6D4
+P74)H2D
+G6J)X3J
+VR9)4YF
+WHL)832
+RT3)ZYW
+8XW)F8L
+4HL)X35
+QXS)QGQ
+T15)BPV
+P2R)SPP
+4S4)BHJ
+3L5)76V
+55S)3Q7
+F8Z)X9K
+6S6)HRR
+M18)BQ8
+5SH)GY4
+TT4)M18
+LPB)82K
+G26)3VT
+KW8)VYL
+MNS)Y83
+VTW)ZBZ
+G1X)H6Y
+6XM)1TW
+D18)G26
+LNL)L2K
+SD3)2CN
+B8L)P74
+ZH4)TTQ
+2DD)VHK
+3FD)2SK
+L1D)RN9
+WSF)Y99
+4NH)P2N
+D81)GW7
+1BJ)9QM
+2MS)CHT
+W81)VXX
+QXJ)656
+6YS)5YL
+K36)RMH
+GXX)GGF
+YLM)GT8
+YP7)RLD
+16B)FZB
+MQM)R6X
+4YF)3SN
+XKV)X9M
+GT5)PPC
+FL4)BMM
+46H)VK5
+QZ4)YG9
+9CW)6GP
+1XX)PPL
+NHJ)X2G
+25F)SL3
+ZLY)RX2
+41Z)WSF
+PJF)PLL
+SD3)R9W
+2R9)2VS
+HZ4)7CJ
+R3L)YNR
+1P9)BM9
+TDX)LNV
+QQX)L1X
+H1G)8TK
+N9H)N2V
+8VC)9X7
+H1G)JLG
+CZG)5SH
+318)H2R
+VZG)92F
+ZW3)WSX
+JJT)7NZ
+VYL)GNK
+V2B)98Z
+Y33)G1X
+CK2)6R2
+Y86)2V7
+4HX)6S6
+FYX)MVZ
+8YY)S93
+X25)F2T
+F95)135
+C94)L1D
+QBW)HP7
+RX2)PJR
+JFV)51W
+BCQ)CZY
+T12)RNP
+1X9)X9B
+CBZ)XYW
+D1M)HHL
+1LH)21L
+5ZG)2JJ
+7TD)3D6
+HQQ)TMZ
+5D7)DDF
+KK4)8C4
+918)1XX
+NLG)K67
+SNV)TZG
+JZF)DNW
+SW4)XQY
+RYL)SVJ
+S6M)CD7
+R6X)RHQ
+2YH)DRD
+XP2)QC1
+NS6)5D7
+LWH)JS9
+2YV)3M4
+TM5)KL9
+PCK)6DD
+V18)8P6
+BTX)QG3
+B99)HG2
+1X9)K6T
+YD6)13V
+ZWK)BCX
+SRY)N9H
+HZ4)1HH
+KYD)GHV
+6XZ)WWL
+G9Q)V2B
+135)PJF
+PJN)NSF
+GHV)3L7
+TVQ)PW8
+HRR)1BJ
+RD7)6L7
+9LY)9DV
+K74)S6F
+VP3)RCJ
+NX2)6NB
+VHK)KGH
+9QM)XZW
+NZF)5Q8
+VQY)ZWK
+YK2)FW2
+X5P)69L
+WHD)QXX
+RSW)LC3
+9S4)HRP
+TTQ)L6S
+RVV)4CC
+XPF)D64
+NYV)K4X
+6BS)XZP
+HDF)ZXH
+GQS)K2Q
+G5F)ML7
+CHT)38Y
+1HP)HMX
+N4X)HT2
+N5W)X8C
+VGW)2ND
+7CJ)TW3
+DQK)XZQ
+S46)G5F
+GQZ)PX7
+ZKR)8LW
+GVW)Y33
+1MV)ZHV
+XK2)1YR
+DLK)R2R
+KPX)VP6
+B1T)KJ7
+COM)47X
+7FR)XL9
+HTH)648
+2KN)GZ9
+D3V)R6Y
+R9M)VHR
+38Y)9CJ
+MFC)BBH
+31T)HTH
+5SV)L69
+QH5)D1C
+RHQ)F4N
+1YR)JL8
+GWV)4NH
+1MR)JVM
+9LW)8PV
+WKH)KFS
+WN2)ZZY
+TFV)S7Z
+69L)JJT
+4H7)B8L
+DNW)1X9
+17H)1V2
+4FJ)V4T
+JSJ)LPB
+93F)P7W
+QK4)4CL
+648)62B
+G31)ZLY
+BVX)ZW4
+XZW)DTH
+PHC)PWH
+VLP)M8B
+J58)R9C
+4L2)THX
+NKC)WHL
+4HX)L8T
+RVV)L9P
+JFD)GKS
+K2P)FMG
+DQS)XCY
+XBQ)FSP
+4V2)HV1
+3SN)T6Q
+Q73)PZV
+9NZ)L3K
+H32)Z4X
+8V7)Q73
+PYV)C36
+TGN)XD3
+YHN)JCL
+Q96)XR4
+8FR)GKM
+MPF)NHW
+X9R)4CP
+YMQ)D3V
+1TW)JFV
+4SP)RVV
+XP2)K2P
+H57)LMT
+T7T)877
+2BB)G92
+GGF)S18
+QCW)8S6
+V4T)LBP
+Y1M)RQ3
+TMZ)ZDB
+S6M)YD6
+6ZJ)F6R
+WB8)QQX
+3M4)58G
+GY4)MYS
+23X)TZQ
+XKB)JC7
+9LW)T58
+FPJ)XK2
+JL8)WTG
+LC3)R85
+3JM)DY3
+BMM)3V1
+FPG)7FL
+XR4)RV8
+3VT)JQC
+8WL)W73
+DKH)TCF
+G9G)7XP
+96Y)TDM
+NJ4)FPJ
+5LP)YRG
+3L7)X1C
+1VZ)K2G
+JWK)VRB
+7FL)5S5
+4CP)6C8
+JF2)CY8
+L6S)1NK
+88G)H5X
+H8B)28K
+LRY)W45
+MG1)9NZ
+2NJ)J9S
+PW8)PM7
+XX1)96R
+129)67X
+TN8)ML5
+YY9)XMQ
+42K)G91
+2VS)T6T
+JKM)QXS
+WN1)2X4
+BVB)4B9
+GJX)7TD
+9CJ)H32
+7NZ)6GS
+KRJ)M9Y
+SNJ)G8G
+76W)DXT
+7J4)4V2
+TQW)BVN
+9YW)8FV
+SM2)H29
+RQ3)35T
+H1C)1MR
+YHF)Q2G
+WHL)HZ4
+4FR)C33
+L9P)19S
+8FH)5XK
+NYL)V4C
+89K)XLZ
+XTW)GT5
+9NF)7FR
+BBH)QT7
+4G5)SXM
+B7S)1HP
+NX9)N4X
+DZP)6HK
+XWJ)6GG
+GQJ)R9X
+JXQ)QCJ
+VBT)JPL
+4N7)VQD
+7TN)13W
+HRP)32V
+M8B)9KL
+KFS)BVB
+LHH)5BX
+QCJ)FSY
+V97)318
+S56)5KF
+1S5)5BR
+6R2)MQM
+FYX)1FJ
+GH2)ZKR
+843)LDK
+LSG)RMS
+32V)3WY
+TR2)18V
+GLZ)HGB
+ZZ5)GXX
+CH4)PHC
+5MQ)JKC
+924)88G
+FWB)KBL
+R9W)4FM
+5Q8)G9G
+X3J)JC9
+C2S)F5C
+9Q9)KHZ
+6HK)DLK
+Z81)5MQ
+6GG)BZ2
+9LZ)6JS
+1WT)YR4
+SS8)C63
+1P9)YVX
+D64)7J4
+XYW)PJX
+6WH)W4H
+SVX)T7T
+6W2)4XF
+2X4)MPF
+DQS)JKM
+KQ3)B43
+HHL)25F
+1C6)L53
+24M)TT1
+L2W)VSB
+ML7)DVZ
+NS6)XZV
+RJN)PMD
+VPH)RYF
+PC1)J4T
+425)3X7
+XDB)VF8
+5S5)QXJ
+93Q)2NJ
+MB3)MMF
+GYX)4S4
+6JS)JMT
+ZS6)LXH
+1HH)2R9
+NCP)5H8
+G9J)6RS
+76V)XX1
+D6M)N83
+VQT)5JJ
+3BN)DV5
+JKC)55S
+QFX)F1Y
+MVZ)NX9
+J86)T12
+2V2)BTX
+D1C)GWV
+W45)WHD
+9XM)KKC
+TK6)ZZ5
+F92)8QY
+F8L)RTD
+8S2)N5W
+DZP)QH5
+XZ9)C2Q
+M55)QMY
+SPT)2B8
+LPM)K8T
+4SP)H2F
+QJ8)FKN
+7PJ)3BP
+XC4)FYQ
+TM9)2MS
+C33)8C3
+TQ6)S38
+35T)TSP
+4MS)H82
+SPP)KK4
+YW2)YP7
+S93)JF5
+RNP)JJ4
+Q6B)JVX
+VNV)TQW
+G8G)DZP
+N2V)9YW
+DFR)DQK
+G92)SD3
+L3K)9NF
+H2F)279
+SN3)G6J
+QD6)4JS
+FHQ)D1J
+9X7)86K
+1X4)YYW
+QG3)Y9T
+6GS)4SR
+JJ4)WP1
+FZT)WB7
+5BR)S46
+LTW)TYQ
+DXT)LQZ
+FZT)VTW
+W4Y)23X
+NRH)TQ6
+MSQ)VZG
+HT2)KSJ
+B69)FK9
+7BQ)79F
+CFG)D6M
+DV5)GQJ
+TR2)DYP
+4C6)P2S
+XPF)2YV
+65Z)5KM
+3VG)C94
+2KN)LPK
+6L7)TMG
+ML5)H57
+BX6)GYX
+2VW)LTW
+76V)LPH
+NXN)WXW
+PMD)VLP
+XHG)QM5
+F34)5PN
+C7Q)94D
+X84)1M9
+FN7)DKH
+6FS)PJH
+MXP)JG3
+2V7)MHT
+417)9XM
+3D6)H8B
+H1T)V97
+WNX)J8R
+78Z)NLG
+VZG)5PT
+QM5)N1M
+F83)W7M
+DMF)V26
+N83)FZT
+JF6)1CR
+S4H)DVY
+HB4)GP4
+H82)CCV
+Q89)F1H
+H2D)QPS
+6L1)5TR
+19S)DFR
+QC1)7QK
+FTV)YY9
+8TH)4L2
+DCR)Q89
+2GS)G97
+9JD)Z3X
+3LB)6NT
+TN4)SVY
+656)4R1
+CD7)Q6H
+5T7)NXQ
+BPV)417
+NSF)MRC
+F4N)B69
+HVF)RYL
+LMV)4GZ
+RZD)2VP
+P96)SM2
+7CK)XVC
+YT5)24D
+M9Y)ZCM
+61P)6J7
+BZ2)DQM
+TRX)PBJ
+X58)5ZG
+PZV)7D1
+G55)JZF
+5CH)3KR
+Y99)1C6
+DZL)QFC
+5LY)R9M
+ZWC)GLZ
+YVX)F34
+9KL)YHN
+62B)VGW
+JVM)B73
+DY4)1LH
+8G6)L81
+T6Q)NCP
+S4L)ZWN
+X8C)4CX
+SVY)K2F
+JF6)NS6
+BM9)4FR
+GT8)3FD
+832)YNP
+6J7)QBW
+4XF)Q96
+1SK)31T
+Y1M)96Y
+51W)TKW
+JMT)VR9
+LLK)TJF
+488)4C6
+83Q)YHF
+Y9T)C7Q
+TZX)8VC
+VSB)B9Z
+VKY)47R
+7D1)SYP
+2WR)NYV
+X5L)8YY
+QMY)G5J
+2B8)JXQ
+WSX)FYX
+V4C)8JH
+H9P)NRH
+2JJ)6GY
+DXH)2BB
+6S1)VQT
+877)YD2
+L53)TS5
+K67)PCK
+3VF)CZG
+MYS)YJJ
+1MR)4B3
+VNV)QCW
+LPH)TM5
+13W)LZS
+K6T)J58
+RBB)9LW
+5KM)JC2
+FKN)SNJ`
 
 main()
