@@ -19,34 +19,12 @@ class Body {
         this.id = id
     }
 
-    @computed get radius() { // Start with radius of sun, decreasing with orbit depth
-        return SUN_RADIUS * (1/4**this.depth)
-    }
-
-    @computed get mass() {
-        // Assume our bodies are approximately as dense as the Earth
-        const earthDensity = 5.51 // g/cm^3
-        const bodyVolume = (4/3)*Math.PI*(this.radius**3)
-        return bodyVolume * earthDensity
-    }
-
-    @computed get orbitalPeriod() {
-        if (!this.planet)
-            return 0
-        // https://en.wikipedia.org/wiki/Orbital_period
-        const a = this.distanceFromPlanet*2 // Semi-major axis
-        const G = 6.674e-11 // Universal gravitational constant
-        const M = this.planet.mass
-        const mu = G*M
-        const timeToOrbit = (2*Math.PI * Math.sqrt((a**3)/mu)) // Kepler's third law, in seconds
-        return timeToOrbit
-    }
-
-    @computed get distanceFromPlanet() {
-        if (!this.planet)
-            return 0
-
-        return (0.8 + Math.random())*5 * (SUN_EARTH_DISTANCE * (1/4**this.depth))
+    get neighbors() {
+        const neighbors = this.moons.slice()
+        if (this.planet) {
+            neighbors.push(this.planet)
+        }
+        return neighbors
     }
 
     pathToOrigin(): Body[] {
@@ -114,6 +92,39 @@ class Puzzle {
 
     @computed get maxOrbitDepth(): number {
         return _.max(this.leafBodies.map(p => p.pathToOrigin().length)) || 0
+    }
+
+    @computed get numOrbits(): number {
+        return _.sum(this.allBodies.map(b => b.depth))
+    }
+
+    @computed get youToSanPath(): Body[] {
+        const you = this.bodiesById['YOU']
+        const san = this.bodiesById['SAN']
+
+        const frontier: Body[] = []
+        const start = you.planet as Body
+        frontier.push(start)
+        const cameFrom = new Map<Body, Body>()
+
+        while (frontier.length) {
+            const current = frontier.pop() as Body
+            for (const next of current.neighbors) {
+                if (!cameFrom.get(next)) {
+                    frontier.push(next)
+                    cameFrom.set(next, current)
+                }
+            }
+        }
+
+        let current = san.planet as Body
+        const path = []
+        while (current !== start) {
+            path.push(current)
+            current = cameFrom.get(current) as Body
+        }
+        path.reverse()
+        return path
     }
 }
 
@@ -194,65 +205,109 @@ class PuzzleVisualization {
         let YOUx = 0, YOUy = 0
         let SANx = 0, SANy = 0
 
-        const renderBody = (body: Body, cx: number, cy: number) => {
-            if (body.id === 'COM') {
-                COMx = cx
-                COMy = cy
-            }
-            if (body.id === 'YOU') {
-                YOUx = cx
-                YOUy = cy
-            }
-            if (body.id === 'SAN') {
-                SANx = cx
-                SANy = cy
-            }
-            const radius = body === this.puzzle.sun ? 30 : Math.max(1, 10 * 1/(1.05**body.depth))
-            const color = body === this.puzzle.sun ? "#fc4646" : "#ffffff"
+        const placements: {[id: string]: { x: number, y: number, radius: number, orbitRadius: number }} = {}
+
+        const placeBody = (body: Body, orbitRadius: number, cx: number, cy: number) => {
+            const radius = body === this.puzzle.sun ? 30 : Math.max(1, 10 * 1/(1.5**body.depth))
+            placements[body.id] = { x: cx, y: cy, radius: radius, orbitRadius: orbitRadius }
     
-            const inc = 2*Math.PI / body.moons.length
-            for (const moon of body.moons) {
-                const orbitDuration = moon.orbitalPeriod*1000 / 100000000 / 8
-                let theta = inc + (this.timePassed/orbitDuration * 2*Math.PI)
-                const r = radius*4
+            for (let i = 0; i < body.moons.length; i++) {
+                const moon = body.moons[i]
+                const orbitDuration =  1/(1+body.depth**0.5) * 10000 * 2
+                let theta = (body.random * 2*Math.PI) + (this.timePassed/orbitDuration * 2*Math.PI)
+                const r = radius*6 + (radius*2*i)
                 const x = cx + r*Math.sin(theta)
                 const y = cy + r*Math.cos(theta)    
     
-                // ctx.strokeStyle = "#0f0"
-                // ctx.beginPath()
-                // ctx.moveTo(cx, cy)
-                // ctx.lineTo(x, y)
-                // ctx.stroke()
-    
-                renderBody(moon, x, y)
-                theta += inc
+                placeBody(moon, r, x, y)
             }
-    
-            ctx.fillStyle = color 
-            ctx.beginPath()
-            ctx.arc(cx, cy, radius, 0, 2*Math.PI)
-            ctx.fill()       
         }
 
-        renderBody(this.puzzle.sun, this.canvasWidth/2, this.canvasHeight/2)
+        placeBody(this.puzzle.sun, 0, this.canvasWidth/2, this.canvasHeight/2)
+
+
+        if (this.app.options.showOrbits) {
+            const renderOrbits = (body: Body) => {
+                const {x, y, radius} = placements[body.id]
+    
+                for (const moon of body.moons) {
+                    const place = placements[moon.id]
+                    ctx.strokeStyle = "rgba(0, 255, 0, 0.8)" 
+                    ctx.beginPath()
+                    ctx.arc(x, y, place.orbitRadius, 0, 2*Math.PI)
+                    ctx.stroke()
+                    renderOrbits(moon)
+                }
+            }
+
+            renderOrbits(this.puzzle.sun)
+        }
+
+        const renderBody = (body: Body) => {
+            const {x, y, radius} = placements[body.id]
+            const color = body === this.puzzle.sun ? "#fc4646" : "#ffffff"
+            ctx.fillStyle = color 
+            ctx.beginPath()
+            ctx.arc(x, y, radius, 0, 2*Math.PI)
+            ctx.fill()
+
+
+            for (const moon of body.moons) {
+                renderBody(moon)
+            }
+        }
+
+        renderBody(this.puzzle.sun)
+
+        if (this.app.options.showSolution1) {
+            const renderLines = (body: Body) => {
+                const {x, y, radius} = placements[body.id]
+    
+                for (const moon of body.moons) {
+                    const place = placements[moon.id]
+                    ctx.strokeStyle = "#0f0"
+                    ctx.beginPath()
+                    ctx.moveTo(x, y)
+                    ctx.lineTo(place.x, place.y)
+                    ctx.stroke()
+                    renderLines(moon)
+                }
+            }
+
+            renderLines(this.puzzle.sun)
+        }
+
+        if (this.app.options.showSolution2) {
+            const path = this.puzzle.youToSanPath
+            const prevplace = placements['YOU']
+            for (const body of path) {
+                const place = placements[body.id]
+
+                ctx.strokeStyle = "#0f0"
+                ctx.beginPath()
+                ctx.moveTo(prevplace.x, prevplace.y)
+                ctx.lineTo(place.x, place.y)
+                ctx.stroke()
+            }
+        }
 
         ctx.fillStyle = "#fff"
         ctx.font = "12px Arial"
         ctx.textBaseline = 'middle'
         ctx.textAlign = "center"
-        ctx.fillText("COM", COMx, COMy)
+        ctx.fillText("COM", placements.COM.x, placements.COM.y)
 
         ctx.fillStyle = "#0f0"
         ctx.font = "12px Arial"
         ctx.textBaseline = 'middle'
         ctx.textAlign = "center"
-        ctx.fillText("YOU", YOUx, YOUy)
+        ctx.fillText("YOU", placements.YOU.x, placements.YOU.y)
 
         ctx.fillStyle = "#0f0"
         ctx.font = "12px Arial"
         ctx.textBaseline = 'middle'
         ctx.textAlign = "center"
-        ctx.fillText("SAN", SANx, SANy)
+        ctx.fillText("SAN", placements.SAN.x, placements.SAN.y)
     }
 }
 
@@ -263,12 +318,12 @@ class PuzzleControls {
     }
 
     start() {
-        // const { app } = this
-        // const ui = document.querySelector("#ui") as HTMLDivElement
+        const { app } = this
+        const ui = document.querySelector("#ui") as HTMLDivElement
 
-        // const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
-        // inputArea.value = INITIAL_INPUT
-        // inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
+        const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
+        inputArea.value = INITIAL_INPUT
+        inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
 
         // const runWires = ui.querySelector("#runWires") as HTMLInputElement
         // runWires.onclick = () => { app.viz.drawTime = 1 * 1000; app.viz.beginAnimation() }
@@ -276,9 +331,9 @@ class PuzzleControls {
         // const runWiresSlowly = ui.querySelector("#runWiresSlowly") as HTMLInputElement
         // runWiresSlowly.onclick = () => { app.viz.drawTime = 60 * 1000; app.viz.beginAnimation() }
     
-        // const showIntersections = ui.querySelector("#showIntersections") as HTMLInputElement
-        // showIntersections.onchange = () => app.options.showIntersections = showIntersections.checked
-        // autorun(() => showIntersections.checked = app.options.showIntersections)
+        const showOrbits = ui.querySelector("#showOrbits") as HTMLInputElement
+        showOrbits.onchange = () => app.options.showOrbits = showOrbits.checked
+        autorun(() => showOrbits.checked = app.options.showOrbits)
 
         const showSolution1 = ui.querySelector("#showSolution1") as HTMLInputElement
         showSolution1.onchange = () => app.options.showSolution1 = showSolution1.checked
@@ -293,30 +348,30 @@ class PuzzleControls {
         const solution1Code = solution1.querySelector("code") as HTMLSpanElement
         const solution2Code = solution2.querySelector("code") as HTMLSpanElement
 
-        // const { options, puzzle } = app
-        // autorun(() => {
-        //     if (options.showSolution1 && puzzle.closestIntersection) {
-        //         solution1.style.display = 'block'
-        //         solution1Code.innerText = puzzle.closestIntersection.point.dist(puzzle.origin).toString()
-        //     } else {
-        //         solution1.style.display = 'none'
-        //     }
-        // })
+        const { options, puzzle } = app
+        autorun(() => {
+            if (options.showSolution1) {
+                solution1.style.display = 'block'
+                solution1Code.innerText = puzzle.numOrbits.toString()
+            } else {
+                solution1.style.display = 'none'
+            }
+        })
 
-        // autorun(() => {
-        //     if (options.showSolution2 && puzzle.fastestIntersection) {
-        //         solution2.style.display = 'block'
-        //         solution2Code.innerText = puzzle.fastestIntersection.combinedStep.toString()
-        //     } else {
-        //         solution2.style.display = 'none'
-        //     }
-        // })
+        autorun(() => {
+            if (options.showSolution2) {    
+                solution2.style.display = 'block'
+                solution2Code.innerText = puzzle.youToSanPath.length.toString()
+            } else {
+                solution2.style.display = 'none'
+            }
+        })
     }
 }
 
 type PuzzleOptions = {
     puzzleInput: string
-    showIntersections: boolean
+    showOrbits: boolean
     showSolution1: boolean
     showSolution2: boolean
 }
@@ -324,7 +379,7 @@ type PuzzleOptions = {
 class PuzzleApp {
     @observable options: PuzzleOptions = {
         puzzleInput: INITIAL_INPUT,
-        showIntersections: true,
+        showOrbits: false,
         showSolution1: false,
         showSolution2: false
     }
