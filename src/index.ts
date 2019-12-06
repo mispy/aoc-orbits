@@ -1,6 +1,7 @@
 import * as _ from 'lodash'
 import './index.scss'
 import { observable, computed, action, autorun } from 'mobx'
+import * as d3_chromatic from 'd3-scale-chromatic'
 const log = console.log
 
 const SUN_RADIUS = 695510 // km
@@ -45,7 +46,7 @@ class Body {
         if (!this.planet)
             return 0
 
-        return (0.2 + Math.random()*10) * (SUN_EARTH_DISTANCE * (1/4**this.depth))
+        return (0.8 + Math.random())*5 * (SUN_EARTH_DISTANCE * (1/4**this.depth))
     }
 
     pathToOrigin(): Body[] {
@@ -167,7 +168,7 @@ class PuzzleVisualization {
         let start: number
         const frame = (timestamp: number) => {
             if (!start) start = timestamp
-            const timePassed = timestamp-start
+            const timePassed = 100000 +timestamp-start
             this.timePassed = timePassed
             this.animationHandle = requestAnimationFrame(frame)
         }
@@ -182,13 +183,15 @@ class PuzzleVisualization {
     // }
 
     renderBody(body: Body, cx: number, cy: number) {
-        const radius = 10 * Math.log(1+Math.log(1+body.radius)) / Math.log(Math.log(SUN_RADIUS))//10 * 1/(body.depth+1)
+        // const radius = 10 * Math.log(1+Math.log(1+body.radius)) / Math.log(Math.log(SUN_RADIUS))//10 * 1/(body.depth+1)
+        const { ctx } = this
+        const radius = Math.max(1, 10 * 1/(1.05**body.depth))
         const color = body === this.puzzle.sun ? "#fc4646" : "#ffffff"
 
-        this.ctx.fillStyle = color 
-        this.ctx.beginPath()
-        this.ctx.arc(cx, cy, radius, 0, 2*Math.PI)
-        this.ctx.fill()
+        ctx.fillStyle = color 
+        ctx.beginPath()
+        ctx.arc(cx, cy, radius, 0, 2*Math.PI)
+        ctx.fill()
 
         const inc = 2*Math.PI / body.moons.length
         for (const moon of body.moons) {
@@ -197,6 +200,13 @@ class PuzzleVisualization {
             const r = radius*4
             const x = cx + r*Math.sin(theta)
             const y = cy + r*Math.cos(theta)    
+
+            // ctx.strokeStyle = "#fff"
+            // ctx.beginPath()
+            // ctx.moveTo(cx, cy)
+            // ctx.lineTo(x, y)
+            // ctx.stroke()
+
             this.renderBody(moon, x, y)
             theta += inc
         }
@@ -295,12 +305,12 @@ class PuzzleControls {
     }
 
     start() {
-        // const { app } = this
-        // const ui = document.querySelector("#ui") as HTMLDivElement
+        const { app } = this
+        const ui = document.querySelector("#ui") as HTMLDivElement
 
-        // const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
-        // inputArea.value = INITIAL_INPUT
-        // inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
+        const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
+        inputArea.value = INITIAL_INPUT
+        inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
 
         // const runWires = ui.querySelector("#runWires") as HTMLInputElement
         // runWires.onclick = () => { app.viz.drawTime = 1 * 1000; app.viz.beginAnimation() }
