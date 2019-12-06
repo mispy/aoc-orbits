@@ -4,8 +4,8 @@ import { observable, computed, action, autorun } from 'mobx'
 import * as d3_chromatic from 'd3-scale-chromatic'
 const log = console.log
 
-const SUN_RADIUS = 695510 // km
-const SUN_EARTH_DISTANCE = 149600000 // km
+const SUN_RADIUS = 6955100 // km
+const SUN_EARTH_DISTANCE = 1496000000 // km
 const EARTH_RADIUS = 6371 // km
 const MOON_RADIUS = 1731 // km
 
@@ -92,6 +92,10 @@ class Puzzle {
         for (const body of _.values(bodies)) {
             body.depth = body.pathToOrigin().length
         }
+
+        ;(window as any).you = bodies['YOU']
+        ;(window as any).com = bodies['COM']
+        ;(window as any).san = bodies['SAN']
 
         return bodies
     }
@@ -182,119 +186,73 @@ class PuzzleVisualization {
     //     )
     // }
 
-    renderBody(body: Body, cx: number, cy: number) {
-        // const radius = 10 * Math.log(1+Math.log(1+body.radius)) / Math.log(Math.log(SUN_RADIUS))//10 * 1/(body.depth+1)
-        const { ctx } = this
-        const radius = Math.max(1, 10 * 1/(1.05**body.depth))
-        const color = body === this.puzzle.sun ? "#fc4646" : "#ffffff"
-
-        ctx.fillStyle = color 
-        ctx.beginPath()
-        ctx.arc(cx, cy, radius, 0, 2*Math.PI)
-        ctx.fill()
-
-        const inc = 2*Math.PI / body.moons.length
-        for (const moon of body.moons) {
-            const orbitDuration = moon.orbitalPeriod*1000 / 1000000000
-            let theta = (this.timePassed/orbitDuration * 2*Math.PI)
-            const r = radius*4
-            const x = cx + r*Math.sin(theta)
-            const y = cy + r*Math.cos(theta)    
-
-            // ctx.strokeStyle = "#fff"
-            // ctx.beginPath()
-            // ctx.moveTo(cx, cy)
-            // ctx.lineTo(x, y)
-            // ctx.stroke()
-
-            this.renderBody(moon, x, y)
-            theta += inc
-        }
-    }
-
     render() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+        const { ctx } = this
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
 
-        const cx = this.canvasWidth/2
-        const cy = this.canvasHeight/2
-        this.renderBody(this.puzzle.sun, cx, cy)
+        let COMx = 0, COMy = 0
+        let YOUx = 0, YOUy = 0
+        let SANx = 0, SANy = 0
 
-        // Evenly partition the rotational space
-        const r = 300
+        const renderBody = (body: Body, cx: number, cy: number) => {
+            if (body.id === 'COM') {
+                COMx = cx
+                COMy = cy
+            }
+            if (body.id === 'YOU') {
+                YOUx = cx
+                YOUy = cy
+            }
+            if (body.id === 'SAN') {
+                SANx = cx
+                SANy = cy
+            }
+            const radius = body === this.puzzle.sun ? 30 : Math.max(1, 10 * 1/(1.05**body.depth))
+            const color = body === this.puzzle.sun ? "#fc4646" : "#ffffff"
+    
+            const inc = 2*Math.PI / body.moons.length
+            for (const moon of body.moons) {
+                const orbitDuration = moon.orbitalPeriod*1000 / 100000000 / 8
+                let theta = inc + (this.timePassed/orbitDuration * 2*Math.PI)
+                const r = radius*4
+                const x = cx + r*Math.sin(theta)
+                const y = cy + r*Math.cos(theta)    
+    
+                // ctx.strokeStyle = "#0f0"
+                // ctx.beginPath()
+                // ctx.moveTo(cx, cy)
+                // ctx.lineTo(x, y)
+                // ctx.stroke()
+    
+                renderBody(moon, x, y)
+                theta += inc
+            }
+    
+            ctx.fillStyle = color 
+            ctx.beginPath()
+            ctx.arc(cx, cy, radius, 0, 2*Math.PI)
+            ctx.fill()       
+        }
 
+        renderBody(this.puzzle.sun, this.canvasWidth/2, this.canvasHeight/2)
 
+        ctx.fillStyle = "#fff"
+        ctx.font = "12px Arial"
+        ctx.textBaseline = 'middle'
+        ctx.textAlign = "center"
+        ctx.fillText("COM", COMx, COMy)
 
+        ctx.fillStyle = "#0f0"
+        ctx.font = "12px Arial"
+        ctx.textBaseline = 'middle'
+        ctx.textAlign = "center"
+        ctx.fillText("YOU", YOUx, YOUy)
 
-
-
-
-
-        // const origin = this.toRenderSpace(this.puzzle.origin)
-
-        // for (const wire of this.puzzle.wires) {
-        //     this.ctx.strokeStyle = wire === this.puzzle.wires[0] ? "#fc8d59" : "#91bfdb"
-        //     this.ctx.lineWidth = Math.ceil(this.cellPixelSize)*2
-        //     this.ctx.beginPath()
-        //     this.ctx.moveTo(origin.x, origin.y)
-        //     this.drawWire(wire)
-        //     this.ctx.stroke()
-        // }
-
-        // if (this.app.options.showIntersections) {
-        //     for (const int of this.puzzle.intersections) {
-        //         if (int.step > this.step)
-        //             continue
-        //         const rp = this.toRenderSpace(int.point)
-        //         this.ctx.fillStyle = "#000000"
-        //         this.ctx.font = "10px Arial"
-        //         this.ctx.textBaseline = 'middle'
-        //         this.ctx.textAlign = "center"
-        //         this.ctx.fillText("x", rp.x, rp.y)
-        //     }    
-        // }
-
-        // this.ctx.fillStyle = "#000000"
-        // this.ctx.beginPath()
-        // this.ctx.arc(origin.x, origin.y, Math.ceil(this.cellPixelSize)*2, 0, 2*Math.PI)
-        // this.ctx.fill()
-
-        // if (this.app.options.showSolution1) {
-        //     const { closestIntersection } = this.puzzle
-        //     if (closestIntersection && closestIntersection.step <= this.step) {
-        //         const rp = this.toRenderSpace(closestIntersection.point)
-
-        //         this.ctx.fillStyle = "#0f0f23"
-        //         this.ctx.beginPath()
-        //         this.ctx.arc(rp.x, rp.y, 6, 0, 2*Math.PI)
-        //         this.ctx.fill()
-
-        //         this.ctx.lineWidth = 1
-        //         this.ctx.strokeStyle = "#ffff66"
-        //         this.ctx.font = "10px Arial"
-        //         this.ctx.textBaseline = 'middle'
-        //         this.ctx.textAlign = "center"
-        //         this.ctx.strokeText("1", rp.x, rp.y+0.5)
-        //     }
-        // }
-
-        // if (this.app.options.showSolution2) {
-        //     const { fastestIntersection } = this.puzzle
-        //     if (fastestIntersection && fastestIntersection.step <= this.step) {
-        //         const rp = this.toRenderSpace(fastestIntersection.point)
-
-        //         this.ctx.lineWidth = 1
-        //         this.ctx.fillStyle = "#0f0f23"
-        //         this.ctx.beginPath()
-        //         this.ctx.arc(rp.x, rp.y, 6, 0, 2*Math.PI)
-        //         this.ctx.fill()
-
-        //         this.ctx.strokeStyle = "#ffff66"
-        //         this.ctx.font = "10px Arial"
-        //         this.ctx.textBaseline = 'middle'
-        //         this.ctx.textAlign = "center"
-        //         this.ctx.strokeText("2", rp.x, rp.y+0.5)
-        //     }
-        // }
+        ctx.fillStyle = "#0f0"
+        ctx.font = "12px Arial"
+        ctx.textBaseline = 'middle'
+        ctx.textAlign = "center"
+        ctx.fillText("SAN", SANx, SANy)
     }
 }
 
@@ -305,12 +263,12 @@ class PuzzleControls {
     }
 
     start() {
-        const { app } = this
-        const ui = document.querySelector("#ui") as HTMLDivElement
+        // const { app } = this
+        // const ui = document.querySelector("#ui") as HTMLDivElement
 
-        const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
-        inputArea.value = INITIAL_INPUT
-        inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
+        // const inputArea = ui.querySelector("textarea") as HTMLTextAreaElement
+        // inputArea.value = INITIAL_INPUT
+        // inputArea.oninput = () => { app.options.puzzleInput = inputArea.value }
 
         // const runWires = ui.querySelector("#runWires") as HTMLInputElement
         // runWires.onclick = () => { app.viz.drawTime = 1 * 1000; app.viz.beginAnimation() }
@@ -322,18 +280,18 @@ class PuzzleControls {
         // showIntersections.onchange = () => app.options.showIntersections = showIntersections.checked
         // autorun(() => showIntersections.checked = app.options.showIntersections)
 
-        // const showSolution1 = ui.querySelector("#showSolution1") as HTMLInputElement
-        // showSolution1.onchange = () => app.options.showSolution1 = showSolution1.checked
-        // autorun(() => showSolution1.checked = app.options.showSolution1)
+        const showSolution1 = ui.querySelector("#showSolution1") as HTMLInputElement
+        showSolution1.onchange = () => app.options.showSolution1 = showSolution1.checked
+        autorun(() => showSolution1.checked = app.options.showSolution1)
 
-        // const showSolution2 = ui.querySelector("#showSolution2") as HTMLInputElement
-        // showSolution2.onchange = () => app.options.showSolution2 = showSolution2.checked
-        // autorun(() => showSolution2.checked = app.options.showSolution2)
+        const showSolution2 = ui.querySelector("#showSolution2") as HTMLInputElement
+        showSolution2.onchange = () => app.options.showSolution2 = showSolution2.checked
+        autorun(() => showSolution2.checked = app.options.showSolution2)
 
-        // const solution1 = document.getElementById("solution1") as HTMLParagraphElement
-        // const solution2 = document.getElementById("solution2") as HTMLParagraphElement
-        // const solution1Code = solution1.querySelector("code") as HTMLSpanElement
-        // const solution2Code = solution2.querySelector("code") as HTMLSpanElement
+        const solution1 = document.getElementById("solution1") as HTMLParagraphElement
+        const solution2 = document.getElementById("solution2") as HTMLParagraphElement
+        const solution1Code = solution1.querySelector("code") as HTMLSpanElement
+        const solution2Code = solution2.querySelector("code") as HTMLSpanElement
 
         // const { options, puzzle } = app
         // autorun(() => {
