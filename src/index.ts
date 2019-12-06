@@ -1,13 +1,15 @@
 import * as _ from 'lodash'
 import './index.scss'
 import { observable, computed, action, autorun } from 'mobx'
-import * as d3_chromatic from 'd3-scale-chromatic'
+import * as d3 from 'd3'
+import { ZoomTransform } from 'd3'
 const log = console.log
 
-const SUN_RADIUS = 6955100 // km
-const SUN_EARTH_DISTANCE = 1496000000 // km
-const EARTH_RADIUS = 6371 // km
-const MOON_RADIUS = 1731 // km
+const BODY_COLORS: {[key: string]: string} = {
+    COM: "#fc4646",
+    YOU: "rgb(0, 255, 194)",
+    SAN: "rgb(0, 255, 194)"
+}
 
 class Body {
     id: string
@@ -133,6 +135,9 @@ class PuzzleVisualization {
     app: PuzzleApp
     canvas: HTMLCanvasElement
     ctx: CanvasRenderingContext2D
+    @observable zoom: number = 1
+    @observable panX: number = 0
+    @observable panY: number = 0
 
     @observable canvasWidth: number = 0
     @observable canvasHeight: number = 0
@@ -154,8 +159,21 @@ class PuzzleVisualization {
         window.addEventListener("resize", this.onResize)
         this.onResize()
 
+        const zoom = d3.zoom()
+            .scaleExtent([0.25, 4])
+            // .translateExtent([[-100, -100], [90, 100]])
+            .on("zoom", () => this.onZoom(d3.event.transform))
+    
+        d3.select("canvas").call(zoom as any)
+
         autorun(() => this.render())
         this.beginAnimation()
+    }
+
+    onZoom(transform: ZoomTransform) {
+        this.zoom = transform.k*window.devicePixelRatio
+        this.panX = transform.x
+        this.panY = transform.y
     }
 
     @action.bound onResize() {
@@ -166,14 +184,12 @@ class PuzzleVisualization {
         this.canvas.style.height = height+'px'
 
         const scale = window.devicePixelRatio
-
         this.canvas.width = width*scale
         this.canvas.height = height*scale
-        this.ctx.scale(scale, scale)
 
         this.canvasWidth = width
         this.canvasHeight = height
-        this.render()
+        this.onZoom(d3.zoomIdentity)
     }
 
     @action.bound beginAnimation() {
@@ -190,20 +206,12 @@ class PuzzleVisualization {
         this.animationHandle = requestAnimationFrame(frame)
     }
 
-    // toRenderSpace(p: Point) {
-    //     return Point.for(
-    //         Math.round(this.canvasWidth/2 + this.cellPixelWidth * p.x),
-    //         Math.round(this.canvasHeight/2 + this.cellPixelHeight * p.y)
-    //     )
-    // }
-
     render() {
         const { ctx } = this
+        ctx.save()
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-
-        let COMx = 0, COMy = 0
-        let YOUx = 0, YOUy = 0
-        let SANx = 0, SANy = 0
+        ctx.translate(this.panX, this.panY)
+        ctx.scale(this.zoom, this.zoom)
 
         const placements: {[id: string]: { x: number, y: number, radius: number, orbitRadius: number }} = {}
 
@@ -232,7 +240,7 @@ class PuzzleVisualization {
     
                 for (const moon of body.moons) {
                     const place = placements[moon.id]
-                    ctx.strokeStyle = "rgba(0, 255, 0, 0.8)" 
+                    ctx.strokeStyle = "rgba(0, 150, 255, 0.8)" 
                     ctx.beginPath()
                     ctx.arc(x, y, place.orbitRadius, 0, 2*Math.PI)
                     ctx.stroke()
@@ -245,7 +253,7 @@ class PuzzleVisualization {
 
         const renderBody = (body: Body) => {
             const {x, y, radius} = placements[body.id]
-            const color = body === this.puzzle.sun ? "#fc4646" : "#ffffff"
+            const color = BODY_COLORS[body.id] || "#ffffff"
             ctx.fillStyle = color 
             ctx.beginPath()
             ctx.arc(x, y, radius, 0, 2*Math.PI)
@@ -265,7 +273,7 @@ class PuzzleVisualization {
     
                 for (const moon of body.moons) {
                     const place = placements[moon.id]
-                    ctx.strokeStyle = "#0f0"
+                    ctx.strokeStyle = BODY_COLORS.COM
                     ctx.beginPath()
                     ctx.moveTo(x, y)
                     ctx.lineTo(place.x, place.y)
@@ -283,7 +291,7 @@ class PuzzleVisualization {
             for (const body of path) {
                 const place = placements[body.id]
 
-                ctx.strokeStyle = "#0f0"
+                ctx.strokeStyle = "rgba(0, 255, 194)"
                 ctx.beginPath()
                 ctx.moveTo(prevplace.x, prevplace.y)
                 ctx.lineTo(place.x, place.y)
@@ -291,23 +299,24 @@ class PuzzleVisualization {
             }
         }
 
-        ctx.fillStyle = "#fff"
-        ctx.font = "12px Arial"
-        ctx.textBaseline = 'middle'
-        ctx.textAlign = "center"
-        ctx.fillText("COM", placements.COM.x, placements.COM.y)
+        if (placements.COM) {
+            ctx.fillStyle = "#fc4646"
+            ctx.font = "14px Arial"
+            ctx.fillText("COM", placements.COM.x+placements.COM.radius-5, placements.COM.y-placements.COM.radius+5)    
+        }
 
-        ctx.fillStyle = "#0f0"
-        ctx.font = "12px Arial"
-        ctx.textBaseline = 'middle'
-        ctx.textAlign = "center"
-        ctx.fillText("YOU", placements.YOU.x, placements.YOU.y)
+        if (placements.YOU) {
+            ctx.fillStyle = BODY_COLORS.YOU
+            ctx.font = "14px Arial"
+            ctx.fillText("YOU", placements.YOU.x+placements.YOU.radius-5, placements.YOU.y-placements.YOU.radius+5)    
+        }
 
-        ctx.fillStyle = "#0f0"
-        ctx.font = "12px Arial"
-        ctx.textBaseline = 'middle'
-        ctx.textAlign = "center"
-        ctx.fillText("SAN", placements.SAN.x, placements.SAN.y)
+        if (placements.SAN) {
+            ctx.fillStyle = BODY_COLORS.SAN
+            ctx.font = "14px Arial"
+            ctx.fillText("SAN", placements.SAN.x+placements.SAN.radius-5, placements.SAN.y-placements.SAN.radius+5)    
+        }
+        ctx.restore()
     }
 }
 
