@@ -251,22 +251,6 @@ class PuzzleVisualization {
             renderOrbits(this.puzzle.sun)
         }
 
-        const renderBody = (body: Body) => {
-            const {x, y, radius} = placements[body.id]
-            const color = BODY_COLORS[body.id] || "#ffffff"
-            ctx.fillStyle = color 
-            ctx.beginPath()
-            ctx.arc(x, y, radius, 0, 2*Math.PI)
-            ctx.fill()
-
-
-            for (const moon of body.moons) {
-                renderBody(moon)
-            }
-        }
-
-        renderBody(this.puzzle.sun)
-
         if (this.app.options.showSolution1) {
             const renderLines = (body: Body) => {
                 const {x, y, radius} = placements[body.id]
@@ -285,9 +269,25 @@ class PuzzleVisualization {
             renderLines(this.puzzle.sun)
         }
 
+        const renderBody = (body: Body) => {
+            const {x, y, radius} = placements[body.id]
+            const color = BODY_COLORS[body.id] || "#ffffff"
+            ctx.fillStyle = color 
+            ctx.beginPath()
+            ctx.arc(x, y, radius, 0, 2*Math.PI)
+            ctx.fill()
+
+
+            for (const moon of body.moons) {
+                renderBody(moon)
+            }
+        }
+
+        renderBody(this.puzzle.sun)
+
         if (this.app.options.showSolution2) {
             const path = this.puzzle.youToSanPath
-            const prevplace = placements['YOU']
+            let prevplace = placements['YOU']
             for (const body of path) {
                 const place = placements[body.id]
 
@@ -296,6 +296,7 @@ class PuzzleVisualization {
                 ctx.moveTo(prevplace.x, prevplace.y)
                 ctx.lineTo(place.x, place.y)
                 ctx.stroke()
+                prevplace = place
             }
         }
 
