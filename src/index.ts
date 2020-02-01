@@ -216,7 +216,7 @@ class PuzzleVisualization {
         const placements: {[id: string]: { x: number, y: number, radius: number, orbitRadius: number }} = {}
 
         const placeBody = (body: Body, orbitRadius: number, cx: number, cy: number) => {
-            const radius = body === this.puzzle.sun ? 30 : Math.max(1, 10 * 1/(1.5**body.depth))
+            const radius = 1//body === this.puzzle.sun ? 30 : Math.max(1, 10 * 1/(1.5**body.depth))
             placements[body.id] = { x: cx, y: cy, radius: radius, orbitRadius: orbitRadius }
     
             for (let i = 0; i < body.moons.length; i++) {
