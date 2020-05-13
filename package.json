@@ -2,9 +2,7 @@
   "homepage": "https//jakesyndal.com/aoc-orbits",
   "scripts": {
     "dev": "webpack-dev-server",
-    "build": "rm -rf build/* && webpack -p",
-    "predeploy": "yarn build",
-    "deploy": "gh-pages -d build"
+    "build": "rm -rf build/* && webpack -p"
   },
   "dependencies": {
     "@types/d3": "^5.7.2",
