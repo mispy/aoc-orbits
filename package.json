@@ -1,5 +1,5 @@
 {
-  "homepage": "https//foldspark.github.io/aoc-wires",
+  "homepage": "https//jakesyndal.com/aoc-orbits",
   "scripts": {
     "dev": "webpack-dev-server",
     "build": "rm -rf build/* && webpack -p",
