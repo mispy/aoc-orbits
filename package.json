@@ -1,5 +1,5 @@
 {
-  "homepage": "https//jsyndal.com/aoc-orbits",
+  "homepage": "https//mispy.me/aoc-orbits",
   "scripts": {
     "dev": "webpack-dev-server",
     "build": "rm -rf build/* && webpack -p"
